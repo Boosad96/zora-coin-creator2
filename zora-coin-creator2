@@ -1,13 +1,17 @@
-// File: app/page.tsx
-
 'use client';
 
 import { useState } from 'react';
+import {
+  WagmiConfig,
+  createConfig,
+  configureChains,
+  useAccount,
+  useNetwork,
+  useSwitchNetwork,
+  http,
+} from 'wagmi';
+import { base } from 'wagmi/chains'; // ✅ FIXED import
 import { ConnectKitProvider, ConnectKitButton } from 'connectkit';
-import { WagmiConfig, createConfig, configureChains } from 'wagmi';
-import { http } from 'viem';
-import { base } from 'viem/chains';
-import { useAccount, useNetwork, useSwitchNetwork } from 'wagmi';
 
 const { chains, publicClient } = configureChains([base], [http()]);
 
@@ -49,7 +53,7 @@ function ZoraCoinCreator() {
     }
 
     try {
-      setStatus('Sending to Zora Create API...');
+      setStatus('🚀 Sending to Zora Create API...');
 
       const res = await fetch('https://create.zora.co/api/editions', {
         method: 'POST',
@@ -67,14 +71,17 @@ function ZoraCoinCreator() {
       });
 
       const data = await res.json();
+
       if (res.ok) {
-        setStatus('✅ Created on Zora: ' + JSON.stringify(data));
+        console.log('✅ Zora Create Success:', data);
+        setStatus('✅ Coin created: https://zora.co/collect/' + data.address);
       } else {
-        setStatus('❌ Failed to create: ' + JSON.stringify(data));
+        console.log('❌ Zora Create Error:', data);
+        setStatus('❌ Failed: ' + (data?.error || JSON.stringify(data)));
       }
     } catch (e) {
-      console.error(e);
-      setStatus('❌ Error minting coin.');
+      console.error('❌ Network or unexpected error:', e);
+      setStatus('❌ Error creating coin.');
     }
   };
 
@@ -82,7 +89,6 @@ function ZoraCoinCreator() {
     <main className="p-4 max-w-xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">🪙 Zora Coin Creator</h1>
       <ConnectKitButton />
-
       <div className="mt-4">
         <input
           className="w-full p-2 border rounded mb-2"
@@ -115,7 +121,6 @@ function ZoraCoinCreator() {
           🚀 Mint Coin
         </button>
       </div>
-
       <p className="mt-4 text-sm text-gray-600 whitespace-pre-wrap">{status}</p>
     </main>
   );
