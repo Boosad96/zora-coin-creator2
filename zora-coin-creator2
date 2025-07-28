@@ -8,11 +8,12 @@ import {
   useAccount,
   useNetwork,
   useSwitchNetwork,
-  http,
 } from 'wagmi';
-import { base } from 'wagmi/chains'; // ✅ FIXED import
+import { base } from 'wagmi/chains';
 import { ConnectKitProvider, ConnectKitButton } from 'connectkit';
+import { http } from 'wagmi';
 
+// Configure chains with explicit Base chain
 const { chains, publicClient } = configureChains([base], [http()]);
 
 const config = createConfig({
@@ -31,97 +32,190 @@ export default function Home() {
 }
 
 function ZoraCoinCreator() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, isConnecting, isDisconnected } = useAccount();
   const { chain } = useNetwork();
-  const { switchNetwork } = useSwitchNetwork();
+  const { switchNetwork, isLoading: isSwitchingNetwork, error: switchNetworkError } = useSwitchNetwork();
 
-  const [name, setName] = useState('');
-  const [symbol, setSymbol] = useState('');
-  const [description, setDescription] = useState('');
-  const [imageURL, setImageURL] = useState('');
-  const [status, setStatus] = useState('');
+  const [name, setName] = useState<string>('');
+  const [symbol, setSymbol] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
+  const [imageURL, setImageURL] = useState<string>('');
+  const [status, setStatus] = useState<string>('');
 
   const handleMint = async () => {
+    // Log initial state for debugging
+    console.log('Minting attempt:', { isConnected, address, chainId: chain?.id, isSwitchingNetwork });
+
+    // Check wallet connection
     if (!isConnected || !address) {
-      alert('Please connect your wallet.');
+      setStatus('⚠️ Wallet not connected. Please connect your wallet.');
+      console.warn('Wallet not connected:', { isConnected, isConnecting, isDisconnected });
       return;
     }
 
+    // Validate inputs
+    if (!name || !symbol || !description || !imageURL) {
+      setStatus('⚠️ Please fill in all fields.');
+      console.warn('Missing inputs:', { name, symbol, description, imageURL });
+      return;
+    }
+
+    if (!imageURL.match(/\.(jpeg|jpg|png|gif)$/i)) {
+      setStatus('⚠️ Invalid image URL. Use jpeg, jpg, png, or gif.');
+      console.warn('Invalid image URL:', imageURL);
+      return;
+    }
+
+    // Check network
     if (chain?.id !== base.id && switchNetwork) {
-      switchNetwork(base.id);
+      setStatus('🔄 Switching to Base network...');
+      console.log('Switching network to Base:', base.id);
+      try {
+        await switchNetwork(base.id);
+        setStatus('✅ Switched to Base network. Try minting again.');
+        console.log('Network switch successful');
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown network switch error';
+        setStatus(`❌ Failed to switch network: ${errorMessage}`);
+        console.error('Network switch error:', error);
+      }
+      return;
+    }
+
+    // Ensure on Base network
+    if (chain?.id !== base.id) {
+      setStatus('⚠️ Please switch to the Base network manually.');
+      console.warn('Incorrect network:', chain?.id, 'Expected:', base.id);
       return;
     }
 
     try {
       setStatus('🚀 Sending to Zora Create API...');
+      console.log('Sending API request with payload:', {
+        name,
+        description,
+        image: imageURL,
+        seller_fee_basis_points: 100,
+        symbol,
+        creator_address: address,
+      });
 
       const res = await fetch('https://create.zora.co/api/editions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // Replace with your API key if required
+          // 'Authorization': `Bearer ${process.env.ZORA_API_KEY || 'YOUR_API_KEY'}`,
         },
         body: JSON.stringify({
           name,
           description,
           image: imageURL,
-          seller_fee_basis_points: 100,
+          seller_fee_basis_points: 100, // 1% royalty
           symbol,
           creator_address: address,
         }),
       });
 
       const data = await res.json();
+      console.log('API response:', { status: res.status, data });
 
       if (res.ok) {
+        setStatus(`✅ Coin created: https://zora.co/collect/${data.address || 'unknown'}`);
         console.log('✅ Zora Create Success:', data);
-        setStatus('✅ Coin created: https://zora.co/collect/' + data.address);
       } else {
-        console.log('❌ Zora Create Error:', data);
-        setStatus('❌ Failed: ' + (data?.error || JSON.stringify(data)));
+        const errorMessage = data?.error || data?.message || 'Unknown API error';
+        setStatus(`❌ Failed: ${getApiErrorMessage(res.status, errorMessage)}`);
+        console.error(`❌ Zora Create Error: HTTP ${res.status} -`, data);
       }
-    } catch (e) {
-      console.error('❌ Network or unexpected error:', e);
-      setStatus('❌ Error creating coin.');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unexpected error';
+      setStatus(`❌ Error creating coin: ${getNetworkErrorMessage(errorMessage)}`);
+      console.error('❌ Minting error:', error);
     }
   };
+
+  // Helper functions for better error messages
+  function getApiErrorMessage(status: number, error: string): string {
+    switch (status) {
+      case 400:
+        return `Invalid input - ${error}`;
+      case 401:
+        return 'Authentication failed. Please check your API key or wallet connection.';
+      case 403:
+        return 'Access denied. Please check your permissions or API key.';
+      case 429:
+        return 'Too many requests. Please try again later.';
+      case 500:
+        return 'Server error. Please try again later.';
+      default:
+        return error;
+    }
+  }
+
+  function getNetworkErrorMessage(error: string): string {
+    if (error.includes('Failed to fetch')) {
+      return 'Network issue. Please check your internet connection and try again.';
+    }
+    return error;
+  }
 
   return (
     <main className="p-4 max-w-xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">🪙 Zora Coin Creator</h1>
       <ConnectKitButton />
-      <div className="mt-4">
+      <div className="mt-4 space-y-2">
         <input
-          className="w-full p-2 border rounded mb-2"
+          className="w-full p-2 border rounded"
           placeholder="Coin Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          aria-label="Coin Name"
+          required
         />
         <input
-          className="w-full p-2 border rounded mb-2"
-          placeholder="Symbol"
+          className="w-full p-2 border rounded"
+          placeholder="Symbol (e.g., ZORA)"
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
+          aria-label="Coin Symbol"
+          required
         />
         <textarea
-          className="w-full p-2 border rounded mb-2"
+          className="w-full p-2 border rounded"
           placeholder="Description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          aria-label="Coin Description"
+          required
         />
         <input
-          className="w-full p-2 border rounded mb-2"
-          placeholder="Image URL (from Craiyon or similar)"
+          className="w-full p-2 border rounded"
+          placeholder="Image URL (jpeg, jpg, png, gif)"
           value={imageURL}
           onChange={(e) => setImageURL(e.target.value)}
+          aria-label="Coin Image URL"
+          required
         />
         <button
           onClick={handleMint}
-          className="bg-black text-white px-4 py-2 rounded w-full"
+          className="bg-black text-white px-4 py-2 rounded w-full disabled:opacity-50"
+          disabled={isSwitchingNetwork || isConnecting || !isConnected}
+          aria-label="Mint Coin"
         >
-          🚀 Mint Coin
+          {isSwitchingNetwork ? 'Switching Network...' : isConnecting ? 'Connecting...' : '🚀 Mint Coin'}
         </button>
       </div>
-      <p className="mt-4 text-sm text-gray-600 whitespace-pre-wrap">{status}</p>
+      {status && (
+        <p className="mt-4 text-sm text-gray-600 whitespace-pre-wrap" aria-live="polite">
+          {status}
+        </p>
+      )}
+      {switchNetworkError && (
+        <p className="mt-2 text-sm text-red-600" aria-live="polite">
+          Network Error: {switchNetworkError.message}
+        </p>
+      )}
     </main>
   );
 }
